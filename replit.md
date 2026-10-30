@@ -1,6 +1,6 @@
 # Preço Certo
 
-Aplicativo em português para extrair ofertas de folhetos de supermercado, comparar preços e estimar o custo de uma lista de compras.
+Aplicativo em português para extrair ofertas de folhetos e itens de notas fiscais de supermercado, comparar preços e estimar o custo de uma lista de compras.
 
 ## Run & Operate
 
@@ -10,7 +10,7 @@ Aplicativo em português para extrair ofertas de folhetos de supermercado, compa
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — PostgreSQL connection string; `OPENROUTER_API_KEY` — secret used by flyer image analysis
-- Optional AI config: `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_MODEL`; OpenRouter defaults to `https://openrouter.ai/api/v1` and `google/gemma-4-26b-a4b-it:free`
+- Optional AI config: `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_MODEL`, `OPENAI_COMPATIBLE_FALLBACK_MODELS`; OpenRouter defaults to `https://openrouter.ai/api/v1`, `nvidia/nemotron-3.5-super-vl:free`, then `google/gemma-4-26b-a4b-it:free`
 
 ## Stack
 
@@ -30,12 +30,12 @@ Aplicativo em português para extrair ofertas de folhetos de supermercado, compa
 
 ## Architecture decisions
 
-- Flyer images are sent to the configured vision endpoint for extraction and are not archived; reviewed offer records and the shopping list are stored in PostgreSQL. **Why:** the requested flow needs image extraction and review, not a flyer archive. **How to apply:** revisit if users need to retain source images for audit.
+- Flyer and receipt images are sent to the configured vision endpoint for extraction and are not archived; reviewed offer records and the shopping list are stored in PostgreSQL. **Why:** the requested flow needs image extraction and review, not a document archive. **How to apply:** revisit if users need to retain source images for audit.
 - Product lookup uses normalized full-name equality, and the same product at one supermarket is replaced only by an offer with an equal or newer flyer date. **Why:** avoid broad-match false positives and stale prices. **How to apply:** keep any future search expansion separate from the exact-match comparison.
 
 ## Product
 
-- Upload or capture a flyer image, extract offers with a configurable OpenAI-compatible vision model, review and correct fields, then save.
+- Upload or capture a flyer, tax receipt, or grocery coupon image; extract product, store, date, price, and unit with a configurable OpenAI-compatible vision model; rotate the image if needed; review and correct fields before saving.
 - Compare exact product names across supermarkets with the lowest price and per-store savings.
 - Build a shopping list and compare covered-item totals and savings by supermarket.
 - The shopping list is currently shared within this app instance; add user accounts and ownership before using it as a multi-user public service.
@@ -46,6 +46,7 @@ _No standing user preferences recorded._
 
 ## Gotchas
 
+- OpenRouter free vision models can return HTTP 429 under shared usage limits. The API retries the configured fallback model; persistent limits require waiting or configuring another vision model.
 - Configure `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_API_KEY`, and `OPENAI_COMPATIBLE_MODEL` together when switching away from the default OpenRouter free vision model.
 
 ## Pointers

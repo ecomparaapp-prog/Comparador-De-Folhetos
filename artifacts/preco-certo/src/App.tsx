@@ -17,8 +17,8 @@ import {
 import type { OfferDraft, ProductComparison } from '@workspace/api-client-react';
 import {
   ArrowDownRight, ArrowRight, Check, CirclePlus, ClipboardList, FileImage, ImagePlus,
-  LoaderCircle, Minus, PackageSearch, Plus, ReceiptText, Search, ShoppingBasket,
-  Sparkles, Trash2, TrendingDown, UploadCloud, X,
+  LoaderCircle, Minus, PackageSearch, Plus, ReceiptText, RotateCcw, RotateCw, Search,
+  ShoppingBasket, Sparkles, Trash2, TrendingDown, UploadCloud, X,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -27,12 +27,47 @@ import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
 const currency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-const datePt = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${value.slice(0, 10)}T12:00:00`)) : 'Ainda sem folheto';
+const datePt = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(`${value.slice(0, 10)}T12:00:00`)) : 'Ainda sem leitura';
 const normalizeName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, ' ');
+type FlyerContentType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+function rotateImageDataUrl(dataUrl: string, degrees: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const angle = ((degrees % 360) + 360) % 360;
+      const swapsDimensions = angle === 90 || angle === 270;
+      const canvas = document.createElement('canvas');
+      canvas.width = swapsDimensions ? image.naturalHeight : image.naturalWidth;
+      canvas.height = swapsDimensions ? image.naturalWidth : image.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reject(new Error('Não foi possível preparar a imagem.'));
+        return;
+      }
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.translate(canvas.width / 2, canvas.height / 2);
+      context.rotate((angle * Math.PI) / 180);
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2);
+      resolve(canvas.toDataURL('image/jpeg', 0.94));
+    };
+    image.onerror = () => reject(new Error('Não foi possível abrir a imagem para girar.'));
+    image.src = dataUrl;
+  });
+}
+
+function getApiErrorMessage(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('data' in error)) return null;
+  const data = (error as { data?: unknown }).data;
+  if (!data || typeof data !== 'object' || !('error' in data)) return null;
+  const message = (data as { error?: unknown }).error;
+  return typeof message === 'string' ? message : null;
+}
 
 function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const nav = [{ href: '/', label: 'Comparar', icon: Search }, { href: '/encartes', label: 'Folhetos', icon: ReceiptText }, { href: '/lista', label: 'Minha lista', icon: ClipboardList }];
+  const nav = [{ href: '/', label: 'Comparar', icon: Search }, { href: '/encartes', label: 'Enviar', icon: ReceiptText }, { href: '/lista', label: 'Minha lista', icon: ClipboardList }];
   return <div className="app-shell">
     <header className="topbar">
       <Link href="/" className="brand" data-testid="link-brand"><span className="brand-mark"><TrendingDown size={20} /></span><span>preço certo</span></Link>
@@ -76,7 +111,7 @@ function CatalogPage() {
       <div className="hero-copy">
         <span className="eyebrow">Compra boa começa antes do mercado</span>
         <h1 className="hero-title">O preço certo.<br /><em>Sem adivinhação.</em></h1>
-        <p className="page-subtitle">Compare ofertas reais dos folhetos da sua região e descubra onde cada compra pesa menos no bolso.</p>
+        <p className="page-subtitle">Compare preços de folhetos e notas fiscais e descubra onde cada compra pesa menos no bolso.</p>
         <div style={{ marginTop: 23 }}><a className="button" href="#comparador" data-testid="link-start-comparing">Comparar preços <ArrowRight size={16} /></a></div>
       </div>
       <div className="hero-visual" aria-label="Ilustração de uma etiqueta de preço comparada">
@@ -91,11 +126,11 @@ function CatalogPage() {
             <div className="summary-cell"><div className="summary-num" data-testid="summary-product-count">{summary.data?.productCount ?? 0}</div><div className="summary-label">produtos comparados</div></div>
             <div className="summary-cell"><div className="summary-num" data-testid="summary-store-count">{summary.data?.storeCount ?? 0}</div><div className="summary-label">supermercados</div></div>
             <div className="summary-cell"><div className="summary-num" data-testid="summary-offer-count">{summary.data?.offerCount ?? 0}</div><div className="summary-label">ofertas registradas</div></div>
-            <div className="summary-cell"><div className="summary-num" style={{ fontSize: 17 }} data-testid="summary-latest-date">{datePt(summary.data?.latestFlyerDate)}</div><div className="summary-label">folheto mais recente</div></div>
+            <div className="summary-cell"><div className="summary-num" style={{ fontSize: 17 }} data-testid="summary-latest-date">{datePt(summary.data?.latestFlyerDate)}</div><div className="summary-label">data mais recente</div></div>
           </>}
     </section>
     <section id="comparador">
-      <div className="section-head"><div><div className="eyebrow">Comparação direta</div><h2 className="section-title" style={{ marginTop: 6 }}>Quanto custa por aí?</h2></div><Link href="/encartes" className="inline-link" data-testid="link-upload-flyer">Adicionar folheto <ArrowRight size={13} style={{ verticalAlign: 'middle' }} /></Link></div>
+      <div className="section-head"><div><div className="eyebrow">Comparação direta</div><h2 className="section-title" style={{ marginTop: 6 }}>Quanto custa por aí?</h2></div><Link href="/encartes" className="inline-link" data-testid="link-upload-flyer">Enviar folheto ou nota <ArrowRight size={13} style={{ verticalAlign: 'middle' }} /></Link></div>
       <form className="search-panel" onSubmit={submitSearch}>
         <Search size={18} color="#829087" /><input aria-label="Nome exato do produto" data-testid="input-product-search" placeholder="Digite o nome do produto, por exemplo: arroz tipo 1" value={searchText} onChange={event => setSearchText(event.target.value)} />
         {searchText && <button type="button" className="button ghost" aria-label="Limpar busca" onClick={() => { setSearchText(''); setSubmittedSearch(undefined); }} data-testid="button-clear-search"><X size={16} /></button>}
@@ -104,7 +139,7 @@ function CatalogPage() {
       {addedProduct && <div className="status-message status-success" role="status" data-testid="status-added-product"><Check size={15} style={{ verticalAlign: 'middle', marginRight: 7 }} />{addedProduct} entrou na sua lista.</div>}
       {products.isLoading ? <div className="offers-list"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div> :
         products.isError ? <StateError retry={() => products.refetch()} /> :
-          rows.length === 0 ? <EmptyState title={submittedSearch ? 'Nenhum produto com esse nome' : 'Seu comparador está começando'} copy={submittedSearch ? 'A busca compara o nome exato do produto. Confira a grafia ou tente um nome completo diferente.' : 'Quando os folhetos forem cadastrados, os melhores preços aparecem aqui. Você também pode enviar um folheto agora.'} icon={submittedSearch ? Search : ShoppingBasket} /> :
+          rows.length === 0 ? <EmptyState title={submittedSearch ? 'Nenhum produto com esse nome' : 'Seu comparador está começando'} copy={submittedSearch ? 'A busca compara o nome exato do produto. Confira a grafia ou tente um nome completo diferente.' : 'Quando enviar folhetos ou notas fiscais, os preços aparecem aqui. Você também pode enviar um documento agora.'} icon={submittedSearch ? Search : ShoppingBasket} /> :
             <div className="offers-list">{rows.map((product, index) => <ProductCard key={`${product.productName}-${index}`} product={product} onAdd={() => addProduct(product.productName)} pending={addItem.isPending} />)}</div>}
     </section>
     <section style={{ marginTop: 48, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, padding: '22px 24px', background: '#eeeade', borderRadius: 18 }}>
@@ -142,6 +177,8 @@ function FlyersPage() {
   const queryClient = useQueryClient();
   const [drafts, setDrafts] = useState<OfferDraft[]>([]);
   const [preview, setPreview] = useState('');
+  const [selectedImage, setSelectedImage] = useState<{ imageBase64: string; contentType: FlyerContentType } | null>(null);
+  const [isRotating, setIsRotating] = useState(false);
   const [fileName, setFileName] = useState('');
   const [message, setMessage] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -149,7 +186,7 @@ function FlyersPage() {
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    if (!(['image/jpeg', 'image/png', 'image/webp'] as string[]).includes(file.type)) {
       setMessage({ kind: 'error', text: 'Escolha uma imagem JPG, PNG ou WebP.' });
       event.target.value = '';
       return;
@@ -160,22 +197,48 @@ function FlyersPage() {
       return;
     }
     setFileName(file.name);
+    setDrafts([]);
     setMessage(null);
+    event.target.value = '';
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result);
       setPreview(dataUrl);
-      const imageBase64 = dataUrl.split(',')[1];
-      analyze.mutate({ data: { imageBase64, contentType: file.type as 'image/jpeg' | 'image/png' | 'image/webp' } }, {
-        onSuccess: result => {
-          setDrafts(result.offers);
-          setMessage(result.offers.length ? { kind: 'success', text: `${result.offers.length} ${result.offers.length === 1 ? 'oferta encontrada' : 'ofertas encontradas'}. Confira os dados antes de salvar.` } : { kind: 'info', text: 'Não encontramos ofertas nesta imagem. Tente uma foto mais nítida e com o folheto inteiro.' });
-        },
-        onError: () => setMessage({ kind: 'error', text: 'Não conseguimos ler esta imagem. Tente outra foto, com boa luz e sem cortes.' }),
+      setSelectedImage({
+        imageBase64: dataUrl.split(',')[1],
+        contentType: file.type as FlyerContentType,
       });
+      setMessage({ kind: 'info', text: 'Imagem pronta. Gire-a se necessário e toque em “Ler documento”.' });
     };
     reader.onerror = () => setMessage({ kind: 'error', text: 'Não foi possível abrir o arquivo selecionado.' });
     reader.readAsDataURL(file);
+  };
+
+  const rotateSelectedImage = async (degrees: number) => {
+    if (!preview || isRotating) return;
+    setIsRotating(true);
+    try {
+      const rotated = await rotateImageDataUrl(preview, degrees);
+      setPreview(rotated);
+      setSelectedImage({ imageBase64: rotated.split(',')[1], contentType: 'image/jpeg' });
+      setMessage({ kind: 'info', text: 'Imagem girada. Toque em “Ler documento” para extrair os produtos.' });
+    } catch {
+      setMessage({ kind: 'error', text: 'Não foi possível girar a imagem. Tente salvá-la novamente como JPG ou PNG.' });
+    } finally {
+      setIsRotating(false);
+    }
+  };
+
+  const analyzeSelectedImage = () => {
+    if (!selectedImage || analyze.isPending) return;
+    setMessage(null);
+    analyze.mutate({ data: selectedImage }, {
+      onSuccess: result => {
+        setDrafts(result.offers);
+        setMessage(result.offers.length ? { kind: 'success', text: `${result.offers.length} ${result.offers.length === 1 ? 'produto identificado' : 'produtos identificados'}. Confira os dados antes de salvar.` } : { kind: 'info', text: 'Não encontramos produtos com preço legível. Tente girar a imagem ou enviar uma foto mais nítida.' });
+      },
+      onError: error => setMessage({ kind: 'error', text: getApiErrorMessage(error) ?? 'Não foi possível conectar ao serviço de leitura. Tente novamente em instantes.' }),
+    });
   };
   const updateDraft = (index: number, key: keyof OfferDraft, value: string) => setDrafts(current => current.map((draft, i) => i !== index ? draft : { ...draft, [key]: key === 'preco' ? Number(value) : value }));
   const removeDraft = (index: number) => setDrafts(current => current.filter((_, i) => i !== index));
@@ -188,6 +251,7 @@ function FlyersPage() {
         setMessage({ kind: 'success', text: `Pronto: ${result.created} novas ofertas salvas, ${result.updated} atualizadas${result.ignored ? ` e ${result.ignored} ignoradas` : ''}.` });
         setDrafts([]);
         setPreview('');
+        setSelectedImage(null);
         setFileName('');
         if (inputRef.current) inputRef.current.value = '';
       },
@@ -196,35 +260,40 @@ function FlyersPage() {
   };
 
   return <div className="page-wrap">
-    <PageHeading eyebrow="Folhetos da semana" title="Do papel para a sua lista." subtitle="Envie uma foto do encarte. A gente organiza as ofertas para você revisar antes de entrar no comparador." />
+    <PageHeading eyebrow="Folhetos e notas fiscais" title="Do papel para a sua lista." subtitle="Envie uma foto do folheto ou da nota fiscal. Revise produtos, preços e unidades antes de comparar." />
     <div className="flyer-layout">
       <section className="surface panel">
-        <h2 className="panel-heading">1. Envie o folheto</h2><p className="panel-desc">Use uma imagem nítida, sem reflexos e com os preços visíveis.</p>
+        <h2 className="panel-heading">1. Envie o documento</h2><p className="panel-desc">Use uma imagem nítida do folheto, nota fiscal ou cupom, com os itens e valores visíveis.</p>
         <div className="upload-box">
           <div className="upload-icon"><ImagePlus size={23} /></div>
-          <h3 className="upload-title">{fileName || 'Escolha uma imagem do folheto'}</h3>
-          <p className="upload-text">JPG, PNG ou WebP. O arquivo é usado para identificar produtos e preços.</p>
+          <h3 className="upload-title">{fileName || 'Escolha um folheto ou nota fiscal'}</h3>
+          <p className="upload-text">JPG, PNG ou WebP. A leitura identifica produtos, preços e unidades como kg e L.</p>
           <input className="file-input" ref={inputRef} id="flyer-upload" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={handleFile} data-testid="input-flyer-image" />
           <label htmlFor="flyer-upload" className="button" style={{ cursor: 'pointer' }} data-testid="button-choose-flyer"><UploadCloud size={16} /> Escolher imagem</label>
-          {preview && <img className="flyer-preview" src={preview} alt="Prévia do folheto selecionado" data-testid="img-flyer-preview" />}
-          {analyze.isPending && <div className="status-message status-info" role="status"><LoaderCircle size={14} className="animate-spin" style={{ verticalAlign: 'middle', marginRight: 7 }} />Lendo ofertas do folheto…</div>}
+          {preview && <img className="flyer-preview" src={preview} alt="Prévia do folheto ou nota fiscal selecionada" data-testid="img-flyer-preview" />}
+          {selectedImage && <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
+            <button type="button" className="button secondary" onClick={() => void rotateSelectedImage(-90)} disabled={isRotating || analyze.isPending} aria-label="Girar imagem 90 graus para a esquerda" data-testid="button-rotate-left"><RotateCcw size={15} /> −90°</button>
+            <button type="button" className="button secondary" onClick={() => void rotateSelectedImage(90)} disabled={isRotating || analyze.isPending} aria-label="Girar imagem 90 graus para a direita" data-testid="button-rotate-right"><RotateCw size={15} /> +90°</button>
+            <button type="button" className="button" onClick={analyzeSelectedImage} disabled={isRotating || analyze.isPending} data-testid="button-analyze-document">{analyze.isPending ? <><LoaderCircle size={15} className="animate-spin" /> Lendo…</> : <><Sparkles size={15} /> Ler documento</>}</button>
+          </div>}
+          {analyze.isPending && <div className="status-message status-info" role="status"><LoaderCircle size={14} className="animate-spin" style={{ verticalAlign: 'middle', marginRight: 7 }} />Lendo produtos e preços…</div>}
         </div>
-        <div style={{ marginTop: 18, display: 'flex', gap: 11, alignItems: 'flex-start', color: '#77847b', fontSize: 11, lineHeight: 1.55 }}><FileImage size={17} /><span>Confira sempre o nome, a unidade e o preço. A leitura automática pode precisar de ajustes.</span></div>
+        <div style={{ marginTop: 18, display: 'flex', gap: 11, alignItems: 'flex-start', color: '#77847b', fontSize: 11, lineHeight: 1.55 }}><FileImage size={17} /><span>Confira sempre o produto, a unidade e o preço extraídos. A leitura automática pode precisar de ajustes.</span></div>
       </section>
       <section className="surface panel">
         <h2 className="panel-heading">2. Revise as ofertas</h2><p className="panel-desc">Corrija qualquer informação antes de salvar no comparador.</p>
         {message && <div className={`status-message status-${message.kind}`} role={message.kind === 'error' ? 'alert' : 'status'} data-testid={`status-flyer-${message.kind}`}>{message.text}</div>}
-        {!drafts.length && !analyze.isPending ? <EmptyState title="As ofertas aparecem aqui" copy="Depois de enviar a imagem, revise e ajuste cada produto, preço e supermercado." icon={ReceiptText} /> :
+        {!drafts.length && !analyze.isPending ? <EmptyState title="Os produtos aparecem aqui" copy="Depois de enviar um folheto ou nota fiscal, revise produto, preço, unidade e supermercado." icon={ReceiptText} /> :
           <>
-            <div className="draft-row draft-header"><span>Produto · categoria</span><span>Supermercado</span><span>Validade do folheto</span><span>Preço</span><span /></div>
+            <div className="draft-row draft-header"><span>Produto · categoria</span><span>Supermercado</span><span>Data folheto / compra</span><span>Preço · unidade</span><span /></div>
             {drafts.map((draft, index) => <div className="draft-row" key={`${draft.produto}-${index}`} data-testid={`row-draft-offer-${index}`}>
               <div style={{ display: 'grid', gap: 6 }}><input className="field" aria-label={`Produto ${index + 1}`} value={draft.produto} onChange={e => updateDraft(index, 'produto', e.target.value)} data-testid={`input-draft-product-${index}`} /><input className="field" aria-label={`Categoria ${index + 1}`} value={draft.categoria} onChange={e => updateDraft(index, 'categoria', e.target.value)} data-testid={`input-draft-category-${index}`} /></div>
               <input className="field" aria-label={`Supermercado ${index + 1}`} value={draft.supermarket} onChange={e => updateDraft(index, 'supermarket', e.target.value)} data-testid={`input-draft-store-${index}`} />
-              <input className="field" type="date" aria-label={`Data do folheto ${index + 1}`} value={draft.dataFolheto.slice(0, 10)} onChange={e => updateDraft(index, 'dataFolheto', e.target.value)} data-testid={`input-draft-date-${index}`} />
+              <input className="field" type="date" aria-label={`Data do folheto ou compra ${index + 1}`} value={draft.dataFolheto.slice(0, 10)} onChange={e => updateDraft(index, 'dataFolheto', e.target.value)} data-testid={`input-draft-date-${index}`} />
               <div style={{ display: 'flex', gap: 5 }}><input className="field" aria-label={`Preço ${index + 1}`} type="number" min="0" step="0.01" value={draft.preco} onChange={e => updateDraft(index, 'preco', e.target.value)} data-testid={`input-draft-price-${index}`} /><input className="field" aria-label={`Unidade ${index + 1}`} value={draft.unidadeMedida} onChange={e => updateDraft(index, 'unidadeMedida', e.target.value)} data-testid={`input-draft-unit-${index}`} /></div>
               <button className="button ghost danger" onClick={() => removeDraft(index)} aria-label={`Remover oferta ${draft.produto}`} data-testid={`button-remove-draft-${index}`}><Trash2 size={16} /></button>
             </div>)}
-            <button className="button" style={{ width: '100%', marginTop: 17 }} disabled={!drafts.length || save.isPending || drafts.some(d => !d.produto.trim() || !d.supermarket.trim() || !d.dataFolheto || !d.categoria.trim() || !d.unidadeMedida.trim() || !Number.isFinite(d.preco) || d.preco < 0)} onClick={saveDrafts} data-testid="button-save-offers">{save.isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando…</> : <><Check size={16} /> Salvar {drafts.length} {drafts.length === 1 ? 'oferta' : 'ofertas'}</>}</button>
+            <button className="button" style={{ width: '100%', marginTop: 17 }} disabled={!drafts.length || save.isPending || drafts.some(d => !d.produto.trim() || !d.supermarket.trim() || d.supermarket === 'Supermercado não identificado' || !d.dataFolheto || !d.categoria.trim() || !d.unidadeMedida.trim() || !Number.isFinite(d.preco) || d.preco < 0)} onClick={saveDrafts} data-testid="button-save-offers">{save.isPending ? <><LoaderCircle size={16} className="animate-spin" /> Salvando…</> : <><Check size={16} /> Salvar {drafts.length} {drafts.length === 1 ? 'oferta' : 'ofertas'}</>}</button>
           </>}
       </section>
     </div>
@@ -279,7 +348,7 @@ function ShoppingListPage() {
         {list.isLoading ? <div style={{ display: 'grid', gap: 11 }}><div className="skeleton" /><div className="skeleton" /></div> :
           list.isError ? <StateError retry={() => list.refetch()} /> :
             !data?.items.length ? <EmptyState title="Ainda sem comparação" copy="Quando sua lista tiver produtos, mostramos cobertura e total por supermercado." icon={TrendingDown} /> :
-              !storeTotals.length ? <EmptyState title="Sem ofertas para comparar" copy="Ainda não há preços cadastrados para estes produtos. Confira novamente depois de novos folhetos." icon={PackageSearch} /> :
+              !storeTotals.length ? <EmptyState title="Sem preços para comparar" copy="Ainda não há preços cadastrados para estes produtos. Confira novamente depois de novos folhetos ou notas fiscais." icon={PackageSearch} /> :
                 <>
                   {bestStore && <div className="status-message status-success" data-testid="status-best-store"><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />{complete.length ? `Menor total com a lista completa: ${bestStore.supermarket}` : `Menor total parcial: ${bestStore.supermarket}`}</div>}
                   {storeTotals.slice().sort((a, b) => a.total - b.total).map((store, index) => <div className={`store-total ${store.supermarket === bestStore?.supermarket ? 'cheapest' : ''}`} key={`${store.supermarket}-${index}`} data-testid={`store-total-${index}`}><div><div className="store-name">{store.supermarket}{store.supermarket === bestStore?.supermarket && <span style={{ marginLeft: 8, color: '#5b8660', fontSize: 9, letterSpacing: '.7px', textTransform: 'uppercase' }}>melhor opção</span>}</div><div className="store-note">{store.coveredItems} de {store.coveredItems + store.missingItems} itens cobertos · {store.missingItems} sem preço</div></div><div className="store-price">{currency(store.total)}</div></div>)}

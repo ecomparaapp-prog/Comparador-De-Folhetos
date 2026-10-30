@@ -64,25 +64,29 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function parseModelPrice(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return Number.NaN;
+  const cleaned = value.replace(/R\$\s?/i, "").replace(/\s/g, "");
+  const normalized = cleaned.includes(",")
+    ? cleaned.replace(/\./g, "").replace(",", ".")
+    : cleaned;
+  return Number(normalized);
+}
+
 function toOfferDraft(value: unknown): OfferDraft | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
-  const supermarket = cleanString(row.supermercado ?? row.supermarket);
+  const supermarket =
+    cleanString(row.supermercado ?? row.supermarket) ||
+    "Supermercado não identificado";
   const dataFolheto = parseModelDate(row.data_folheto ?? row.dataFolheto) ?? "";
-  const categoria = cleanString(row.categoria ?? row.category);
+  const categoria = cleanString(row.categoria ?? row.category) || "Outros";
   const produto = cleanString(row.produto ?? row.product);
   const unidadeMedida = cleanString(row.unidade_medida ?? row.unidadeMedida ?? row.unit);
-  const rawPrice = row.preco ?? row.price;
-  const preco =
-    typeof rawPrice === "number"
-      ? rawPrice
-      : typeof rawPrice === "string"
-        ? Number(rawPrice.replace(",", "."))
-        : Number.NaN;
+  const preco = parseModelPrice(row.preco ?? row.price);
 
   if (
-    !supermarket ||
-    !categoria ||
     !produto ||
     !Number.isFinite(preco) ||
     preco < 0 ||
@@ -110,7 +114,7 @@ router.post("/flyers/analyze", async (req, res): Promise<void> => {
   }
 
   const { imageBase64, contentType } = parsed.data;
-  if (imageBase64.length > 12_500_000) {
+  if (imageBase64.length > 13_000_000) {
     res.status(413).json({ error: "A imagem excede o limite de tamanho de 9 MB." });
     return;
   }
@@ -131,52 +135,100 @@ router.post("/flyers/analyze", async (req, res): Promise<void> => {
   const model =
     process.env.OPENAI_COMPATIBLE_MODEL ??
     process.env.OPENROUTER_MODEL ??
-    "google/gemma-4-26b-a4b-it:free";
+    "nvidia/nemotron-3.5-super-vl:free";
+  const configuredFallbacks = process.env.OPENAI_COMPATIBLE_FALLBACK_MODELS
+    ?.split(",")
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  const fallbackModels =
+    configuredFallbacks ??
+    (baseUrl.includes("openrouter.ai")
+      ? ["google/gemma-4-26b-a4b-it:free"]
+      : []);
+  const models = Array.from(new Set([model, ...fallbackModels]));
   const endpoint = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  let activeModel = model;
 
   try {
-    const aiResponse = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Extraia ofertas de supermercado da imagem. Responda apenas com JSON válido, sem markdown, no formato {\"offers\":[{\"supermercado\":\"...\",\"data_folheto\":\"YYYY-MM-DD\",\"categoria\":\"...\",\"produto\":\"...\",\"preco\":0.00,\"unidade_medida\":\"...\"}]}. Use a data de validade/publicação visível; se não houver uma data legível, use uma string vazia. Não invente preço ou produto; omita campos ilegíveis. Inclua uma oferta por produto e use preço numérico em reais.",
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Leia o folheto e extraia todos os produtos com preço legível, supermercado e data do folheto.",
-              },
-              {
-                type: "image_url",
-                image_url: { url: `data:${contentType};base64,${imageBase64}` },
-              },
-            ],
-          },
-        ],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      req.log.warn(
-        { status: aiResponse.status, model },
-        "Vision provider rejected flyer analysis",
-      );
-      res.status(502).json({
-        error:
-          "Não foi possível analisar o folheto. Verifique o modelo configurado e tente novamente.",
+    let aiResponse: Response | undefined;
+    for (const candidateModel of models) {
+      const candidateResponse = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: candidateModel,
+          temperature: 0.1,
+          max_tokens: 8192,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "Leia imagens de supermercados brasileiros: folhetos de ofertas, notas fiscais eletrônicas impressas e cupons fiscais. Identifique o tipo de documento. Responda somente com JSON válido, sem markdown, no formato {\"offers\":[{\"supermercado\":\"...\",\"data_folheto\":\"YYYY-MM-DD\",\"categoria\":\"...\",\"produto\":\"...\",\"preco\":0.00,\"unidade_medida\":\"...\"}]}. Extraia uma oferta por produto anunciado ou comprado. Em nota/cupom, use o nome da loja e a data de emissão/compra; não inclua subtotal, total, impostos, formas de pagamento ou linhas que não sejam produtos. Em folhetos, use a data de validade/publicação. Preserve marca, tipo e tamanho no nome do produto. Use a unidade indicada: kg, g, L, ml ou un; normalize litro para L. Para produtos vendidos por peso/volume, prefira o preço por kg/L impresso. Se a nota mostrar apenas quantidade e total da linha, calcule o valor por kg/L usando a quantidade visível e converta g para kg e ml para L; se não houver quantidade suficiente para calcular, use o valor da linha sem inventar. Converta valores brasileiros como R$ 7,90 para número 7.90. Categorize cada produto pela categoria mais provável. Não invente dados: use string vazia se loja/data não estiver legível e omita produtos sem nome ou preço legíveis.",
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Extraia os produtos e campos legíveis deste folheto, nota fiscal ou cupom fiscal.",
+                },
+                {
+                  type: "image_url",
+                  image_url: { url: `data:${contentType};base64,${imageBase64}` },
+                },
+              ],
+            },
+          ],
+        }),
       });
+
+      if (candidateResponse.ok) {
+        activeModel = candidateModel;
+        aiResponse = candidateResponse;
+        break;
+      }
+
+      const canTryFallback =
+        [400, 404, 429, 502, 503].includes(candidateResponse.status) &&
+        candidateModel !== models[models.length - 1];
+      req.log.warn(
+        { status: candidateResponse.status, model: candidateModel, fallback: canTryFallback },
+        canTryFallback
+          ? "Vision model unavailable; trying the next configured model"
+          : "Vision provider rejected flyer analysis",
+      );
+      if (!canTryFallback) {
+        aiResponse = candidateResponse;
+        break;
+      }
+    }
+
+    if (!aiResponse) {
+      res.status(503).json({
+        error: "Nenhum modelo de leitura está disponível no momento. Tente novamente em instantes.",
+      });
+      return;
+    }
+    if (!aiResponse.ok) {
+      if (aiResponse.status === 429) {
+        res.status(503).json({
+          error:
+            "O limite temporário dos modelos gratuitos foi atingido. Aguarde alguns minutos ou configure outro modelo de visão.",
+        });
+      } else if ([401, 403].includes(aiResponse.status)) {
+        res.status(503).json({
+          error: "O provedor de IA recusou a chave configurada. Confira o Secret e o acesso ao modelo.",
+        });
+      } else {
+        res.status(502).json({
+          error:
+            "O modelo configurado não aceitou a imagem. Verifique se ele oferece visão e formato JSON.",
+        });
+      }
       return;
     }
 
@@ -204,16 +256,16 @@ router.post("/flyers/analyze", async (req, res): Promise<void> => {
       .filter((offer): offer is OfferDraft => offer !== null);
     if (offers.length === 0) {
       res.status(422).json({
-        error: "Nenhum produto completo foi identificado. Envie uma imagem mais nítida.",
+        error: "Nenhum produto completo foi identificado. Gire a imagem se necessário e tente uma foto mais nítida.",
       });
       return;
     }
 
     res.json(AnalyzeFlyerResponse.parse({ offers }));
   } catch (error) {
-    req.log.warn({ err: error, model }, "Flyer analysis could not be parsed");
+    req.log.warn({ err: error, model: activeModel }, "Flyer analysis could not be parsed");
     res.status(502).json({
-      error: "A leitura do folheto falhou. Tente uma imagem mais nítida ou revise o modelo.",
+      error: "Não foi possível interpretar o retorno da IA. Tente girar a imagem ou enviar uma foto mais nítida.",
     });
   }
 });
