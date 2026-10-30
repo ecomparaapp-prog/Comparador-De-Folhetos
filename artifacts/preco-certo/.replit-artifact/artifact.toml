@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Preço Certo"
+description = "Aplicativo para comparar preços de supermercados a partir de folhetos enviados por imagem. Permite revisar produtos extraídos por IA, encontrar o menor preço e montar uma lista de compras com economia calculada."
+version = "1.0.0"
+id = "artifacts/preco-certo"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24217
+
+[services.development]
+run = "pnpm --filter @workspace/preco-certo run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/preco-certo", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/preco-certo/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24217"
+BASE_PATH = "/"

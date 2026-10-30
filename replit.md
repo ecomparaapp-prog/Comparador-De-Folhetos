@@ -1,6 +1,6 @@
-# [Project name]
+# Preço Certo
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Aplicativo em português para extrair ofertas de folhetos de supermercado, comparar preços e estimar o custo de uma lista de compras.
 
 ## Run & Operate
 
@@ -9,7 +9,8 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — PostgreSQL connection string; `OPENROUTER_API_KEY` — secret used by flyer image analysis
+- Optional AI config: `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_MODEL`; OpenRouter defaults to `https://openrouter.ai/api/v1` and `google/gemma-4-26b-a4b-it:free`
 
 ## Stack
 
@@ -22,23 +23,30 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/api-spec/openapi.yaml` — API contract and generated client/schema source
+- `lib/db/src/schema/product-offers.ts` — current offer and shopping-list tables
+- `artifacts/api-server/src/routes/prices.ts` — flyer analysis, exact product comparison, and shopping-list logic
+- `artifacts/preco-certo/src/App.tsx` and `src/index.css` — web interface and theme
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Flyer images are sent to the configured vision endpoint for extraction and are not archived; reviewed offer records and the shopping list are stored in PostgreSQL. **Why:** the requested flow needs image extraction and review, not a flyer archive. **How to apply:** revisit if users need to retain source images for audit.
+- Product lookup uses normalized full-name equality, and the same product at one supermarket is replaced only by an offer with an equal or newer flyer date. **Why:** avoid broad-match false positives and stale prices. **How to apply:** keep any future search expansion separate from the exact-match comparison.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Upload or capture a flyer image, extract offers with a configurable OpenAI-compatible vision model, review and correct fields, then save.
+- Compare exact product names across supermarkets with the lowest price and per-store savings.
+- Build a shopping list and compare covered-item totals and savings by supermarket.
+- The shopping list is currently shared within this app instance; add user accounts and ownership before using it as a multi-user public service.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+_No standing user preferences recorded._
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Configure `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_API_KEY`, and `OPENAI_COMPATIBLE_MODEL` together when switching away from the default OpenRouter free vision model.
 
 ## Pointers
 

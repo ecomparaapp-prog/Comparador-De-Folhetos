@@ -10,6 +10,12 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: flyers
+    description: Análise de folhetos e cadastro de ofertas
+  - name: products
+    description: Pesquisa e comparação de preços
+  - name: shopping-list
+    description: Lista de compras e totais por supermercado
 paths:
   /healthz:
     get:
@@ -24,6 +30,160 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /flyers/analyze:
+    post:
+      operationId: analyzeFlyer
+      tags: [flyers]
+      summary: Extrair ofertas de uma imagem de folheto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlyerImageInput"
+      responses:
+        "200":
+          description: Ofertas extraídas para revisão
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlyerAnalysis"
+        "400":
+          description: Imagem inválida ou ilegível
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Falha no provedor de IA
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      summary: Pesquisar produtos e comparar ofertas
+      parameters:
+        - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+          description: Busca pelo nome normalizado exato do produto
+      responses:
+        "200":
+          description: Produtos e ofertas por supermercado
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductComparison"
+    post:
+      operationId: saveOffers
+      tags: [products]
+      summary: Salvar ofertas revisadas do folheto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveOffersInput"
+      responses:
+        "200":
+          description: Resultado do cadastro com substituição por data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveOffersResult"
+  /summary:
+    get:
+      operationId: getSummary
+      tags: [products]
+      summary: Resumo do catálogo de preços
+      responses:
+        "200":
+          description: Indicadores atuais do catálogo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogSummary"
+  /shopping-list:
+    get:
+      operationId: getShoppingList
+      tags: [shopping-list]
+      summary: Consultar lista e totais por supermercado
+      responses:
+        "200":
+          description: Lista com totais e cobertura por loja
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingListResponse"
+    post:
+      operationId: addShoppingListItem
+      tags: [shopping-list]
+      summary: Adicionar produto à lista
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShoppingListInput"
+      responses:
+        "201":
+          description: Produto adicionado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingListResponse"
+  /shopping-list/{id}:
+    patch:
+      operationId: updateShoppingListItem
+      tags: [shopping-list]
+      summary: Alterar quantidade de um produto
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShoppingListUpdate"
+      responses:
+        "200":
+          description: Quantidade atualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingListResponse"
+        "404":
+          description: Produto não encontrado na lista
+    delete:
+      operationId: removeShoppingListItem
+      tags: [shopping-list]
+      summary: Remover produto da lista
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Produto removido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingListResponse"
+        "404":
+          description: Produto não encontrado na lista
 components:
   schemas:
     HealthStatus:
@@ -33,4 +193,186 @@ components:
           type: string
       required:
         - status
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    FlyerImageInput:
+      type: object
+      properties:
+        imageBase64:
+          type: string
+          minLength: 1
+          description: Imagem codificada em base64, sem prefixo data URI
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+      required: [imageBase64, contentType]
+    OfferDraft:
+      type: object
+      properties:
+        supermarket:
+          type: string
+        dataFolheto:
+          type: string
+          description: Data no formato YYYY-MM-DD
+        categoria:
+          type: string
+        produto:
+          type: string
+        preco:
+          type: number
+          minimum: 0
+        unidadeMedida:
+          type: string
+      required: [supermarket, dataFolheto, categoria, produto, preco, unidadeMedida]
+    FlyerAnalysis:
+      type: object
+      properties:
+        offers:
+          type: array
+          items:
+            $ref: "#/components/schemas/OfferDraft"
+      required: [offers]
+    OfferInput:
+      type: object
+      properties:
+        supermarket:
+          type: string
+          minLength: 1
+        dataFolheto:
+          type: string
+          format: date
+        categoria:
+          type: string
+          minLength: 1
+        produto:
+          type: string
+          minLength: 1
+        preco:
+          type: number
+          minimum: 0
+        unidadeMedida:
+          type: string
+          minLength: 1
+      required: [supermarket, dataFolheto, categoria, produto, preco, unidadeMedida]
+    SaveOffersInput:
+      type: object
+      properties:
+        offers:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OfferInput"
+      required: [offers]
+    SaveOffersResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        updated:
+          type: integer
+        ignored:
+          type: integer
+      required: [created, updated, ignored]
+    Offer:
+      allOf:
+        - $ref: "#/components/schemas/OfferInput"
+        - type: object
+          properties:
+            id:
+              type: integer
+            economiaReais:
+              type: number
+            economiaPercentual:
+              type: number
+          required: [id, economiaReais, economiaPercentual]
+    ProductComparison:
+      type: object
+      properties:
+        productName:
+          type: string
+        category:
+          type: string
+        unit:
+          type: string
+        lowestPrice:
+          type: number
+        highestPrice:
+          type: number
+        offers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Offer"
+      required: [productName, category, unit, lowestPrice, highestPrice, offers]
+    CatalogSummary:
+      type: object
+      properties:
+        productCount:
+          type: integer
+        storeCount:
+          type: integer
+        offerCount:
+          type: integer
+        latestFlyerDate:
+          type: ["string", "null"]
+      required: [productCount, storeCount, offerCount, latestFlyerDate]
+    ShoppingListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        productName:
+          type: string
+        quantity:
+          type: integer
+      required: [id, productName, quantity]
+    ShoppingListInput:
+      type: object
+      properties:
+        productName:
+          type: string
+          minLength: 1
+        quantity:
+          type: integer
+          minimum: 1
+          default: 1
+      required: [productName, quantity]
+    ShoppingListUpdate:
+      type: object
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+      required: [quantity]
+    StoreTotal:
+      type: object
+      properties:
+        supermarket:
+          type: string
+        total:
+          type: number
+        coveredItems:
+          type: integer
+        missingItems:
+          type: integer
+      required: [supermarket, total, coveredItems, missingItems]
+    ShoppingListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShoppingListItem"
+        storeTotals:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreTotal"
+        cheapestStore:
+          type: ["string", "null"]
+        totalSavings:
+          type: number
+      required: [items, storeTotals, cheapestStore, totalSavings]
 
